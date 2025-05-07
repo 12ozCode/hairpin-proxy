@@ -1,24 +1,32 @@
-FROM ruby:2.7.2-alpine AS build
+# Stage 1: build
+FROM python:3.12-alpine AS build
 
-ENV GEM_HOME="/usr/local/bundle"
-ENV PATH $GEM_HOME/bin:$GEM_HOME/gems/bin:$PATH
-RUN echo "gem: --no-document" > ~/.gemrc
+ENV PYTHONUNBUFFERED=1
 
 RUN apk add --no-cache \
-  build-base \
-  ruby-dev
+    gcc \
+    musl-dev \
+    libffi-dev \
+    openssl-dev
 
-COPY Gemfile Gemfile.lock /app/
-WORKDIR /app/
-RUN bundle install --jobs 16 --retry 5
-
-# Comment out these four lines for development convenience.
-# Uncomment for a smaller container image.
-FROM ruby:2.7.2-alpine AS run
-COPY --from=build $GEM_HOME $GEM_HOME
-COPY Gemfile Gemfile.lock /app/
-WORKDIR /app/
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
 COPY ./src/ /app/src/
 
-CMD ["/app/src/main.rb"]
+# Stage 2: slim runtime
+FROM python:3.12-alpine AS runtime
+
+WORKDIR /app
+
+# Copy installed Python packages from build stage
+COPY --from=build /usr/local/lib/python3.12 /usr/local/lib/python3.12
+COPY --from=build /usr/local/bin /usr/local/bin
+COPY --from=build /usr/local/include /usr/local/include
+COPY --from=build /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+
+# Copy the app code
+COPY ./src/ /app/src/
+
+CMD ["python", "/app/src/main.py"]
